@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
 # RUN playwright install-deps chromium
 # RUN playwright install chromium
 
+COPY scrape.py /root/
+COPY install.sh /root/
+
 ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
