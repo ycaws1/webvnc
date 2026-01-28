@@ -19,8 +19,11 @@ rm -rf /tmp/.X*-lock /tmp/.X11-unix\n\
 mkdir -p /root/.vnc\n\
 echo 'password' | vncpasswd -f > /root/.vnc/passwd\n\
 chmod 600 /root/.vnc/passwd\n\
+# This line ensures XFCE starts with the VNC session\n\
+echo 'startxfce4 &' > /root/.vnc/xstartup\n\
+chmod +x /root/.vnc/xstartup\n\
 vncserver :1 -geometry 1280x800 -depth 24\n\
-/usr/share/novnc/utils/launch.sh --vnc localhost:5901 --listen ${PORT:-6080}" > /entrypoint.sh
+/usr/share/novnc/utils/launch.sh --vnc localhost:5901 --listen 8000" > /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 CMD ["/entrypoint.sh"]
