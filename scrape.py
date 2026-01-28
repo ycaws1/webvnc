@@ -59,6 +59,7 @@ async def scrape_google_n_revolut_rate():
                 f.write(inner_html)
             print(f"Failed to scrape Revolut rate: {e}")
             await context.tracing.stop(path="trace.zip")
+            page_2_rate = None
         
         await browser.close()
         return [page_1_rate, page_2_rate]
