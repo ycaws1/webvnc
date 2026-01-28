@@ -87,7 +87,7 @@ async def scrape_google_n_revolut_rate():
     stealth = Stealth()
     # headless_mode = os.getenv("HEADLESS_SCRAPE", "True").lower() == "true"
     headless_mode = False
-    page_1_rate = None
+    # page_1_rate = None
     page_2_rate = None
     
     async with async_playwright() as p:
@@ -100,19 +100,19 @@ async def scrape_google_n_revolut_rate():
             viewport={'width': 1920, 'height': 1080}
         )
         await stealth.apply_stealth_async(context)
-        page_1 = await context.new_page()
+        # page_1 = await context.new_page()
         page_2 = await context.new_page()
 
-        # Scrape Google Finance
-        url = "https://www.google.com/finance/quote/SGD-MYR"
-        logger.info(f"Navigating to {url}...")
-        try:
-            await page_1.goto(url)
-            await page_1.wait_for_selector('div[data-last-price]', timeout=5000)
-            rate = await page_1.locator('div[data-last-price]').get_attribute('data-last-price')
-            page_1_rate = float(rate)
-        except Exception as e:
-            logger.error(f"Failed to scrape Google rate: {e}")
+        # # Scrape Google Finance
+        # url = "https://www.google.com/finance/quote/SGD-MYR"
+        # logger.info(f"Navigating to {url}...")
+        # try:
+        #     await page_1.goto(url)
+        #     await page_1.wait_for_selector('div[data-last-price]', timeout=5000)
+        #     rate = await page_1.locator('div[data-last-price]').get_attribute('data-last-price')
+        #     page_1_rate = float(rate)
+        # except Exception as e:
+        #     logger.error(f"Failed to scrape Google rate: {e}")
         
         # Scrape Revolut
         url = "https://www.revolut.com/currency-converter/convert-sgd-to-myr-exchange-rate/"
@@ -132,7 +132,7 @@ async def scrape_google_n_revolut_rate():
         
         await browser.close()
     
-    return [page_1_rate, page_2_rate]
+    return [page_2_rate]
 
 
 async def scrape_and_save():
@@ -144,11 +144,11 @@ async def scrape_and_save():
     try:
         rates = await scrape_google_n_revolut_rate()
         
-        # Save Google rate
-        if rates[0] is not None:
-            await save_rate("Google", rates[0], timestamp=now_utc)
-        else:
-            logger.warning("No rate obtained from Google")
+        # # Save Google rate
+        # if rates[0] is not None:
+        #     await save_rate("Google", rates[0], timestamp=now_utc)
+        # else:
+        #     logger.warning("No rate obtained from Google")
         
         # Save Revolut rate
         if rates[1] is not None:
