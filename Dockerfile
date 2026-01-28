@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean
 
 # Install Playwright system dependencies
-RUN pip3 install playwright playwright-stealth
-RUN playwright install-deps chromium
+RUN pip3 install playwright playwright-stealth apscheduler python-dotenv asyncpg asyncio
+# RUN playwright install-deps chromium
 RUN playwright install chromium
 
 COPY main.py /root/
