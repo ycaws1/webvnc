@@ -18,7 +18,6 @@ RUN playwright install chromium
 COPY main.py /root/
 COPY install.sh /root/
 
-ENV DATABASE_CONNSTR=${DATABASE_CONNSTR:-""}
 ENV USER=root
 ENV HOME=/root
 ENV DISPLAY=:1
