@@ -14,16 +14,13 @@ ENV DISPLAY=:1
 
 EXPOSE 6080 5901 8000
 
-RUN echo "#!/bin/bash
-rm -rf /tmp/.X*-lock /tmp/.X11-unix
-mkdir -p /root/.vnc
-echo 'password' | vncpasswd -f > /root/.vnc/passwd
-chmod 600 /root/.vnc/passwd
-vncserver :1 -geometry 1280x800 -depth 24
-/usr/share/novnc/utils/launch.sh --vnc localhost:5901 --listen 6080 &
-# health check server
-python3 -m http.server 8000 --bind 0.0.0.0
-" > /entrypoint.sh
+RUN echo "#!/bin/bash\n\
+rm -rf /tmp/.X*-lock /tmp/.X11-unix\n\
+mkdir -p /root/.vnc\n\
+echo 'password' | vncpasswd -f > /root/.vnc/passwd\n\
+chmod 600 /root/.vnc/passwd\n\
+vncserver :1 -geometry 1280x800 -depth 24\n\
+/usr/share/novnc/utils/launch.sh --vnc localhost:5901 --listen 6080" > /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 CMD ["/entrypoint.sh"]
