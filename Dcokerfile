@@ -1,0 +1,33 @@
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install desktop environment and noVNC
+RUN apt-get update && apt-get install -y \
+    xfce4 xfce4-goodies \
+    tightvncserver \
+    novnc websockify \
+    python3 \
+    && apt-get clean
+
+# Setup VNC environment
+ENV USER=root
+ENV HOME=/root
+ENV DISPLAY=:1
+
+# Expose the web port for noVNC
+EXPOSE 6080
+
+# Create a startup script
+RUN echo "#!/bin/bash\n\
+rm -rf /tmp/.X*-lock /tmp/.X11-unix\n\
+mkdir -p /root/.vnc\n\
+echo 'password' | vncpasswd -f > /root/.vnc/passwd\n\
+chmod 600 /root/.vnc/passwd\n\
+vncserver :1 -geometry 1280x800 -depth 24\n\
+/usr/share/novnc/utils/launch.sh --vnc localhost:5901 --listen 6080" > /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]
