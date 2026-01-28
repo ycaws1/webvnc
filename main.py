@@ -46,8 +46,8 @@ scrape_stats = {
     "next_scrape_time": None
 }
 
-# Store recent logs in memory (max 100 entries)
-log_entries = deque(maxlen=100)
+# Store recent logs in memory (max 500 entries)
+log_entries = deque(maxlen=500)
 
 # Custom logging handler to capture logs
 class LogHandler(logging.Handler):
