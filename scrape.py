@@ -50,5 +50,5 @@ async def scrape_google_n_revolut_rate():
         await browser.close()
         return page_1_rate
 
-result = await scrape_google_n_revolut_rate()
+result = asyncio.run(scrape_google_n_revolut_rate())
 print(result)
