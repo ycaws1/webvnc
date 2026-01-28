@@ -151,7 +151,7 @@ async def scrape_and_save():
         #     logger.warning("No rate obtained from Google")
         
         # Save Revolut rate
-        if rates[1] is not None:
+        if rates[0] is not None:
             await save_rate("Revolut", rates[1], timestamp=now_utc)
         else:
             logger.warning("No rate obtained from Revolut")
