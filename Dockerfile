@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean
 
 # Install Python packages
-RUN pip3 install playwright playwright-stealth apscheduler python-dotenv asyncpg asyncio fastapi uvicorn
+RUN pip3 install playwright playwright-stealth apscheduler python-dotenv asyncpg asyncio fastapi uvicorn gspread oauth2client
 
 # Install Playwright browser
 RUN playwright install chromium
