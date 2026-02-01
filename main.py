@@ -366,7 +366,7 @@ async def scrape_google_rate(wait_sec=1):
         
         try:
             creds_dict = json.loads(GSHEET_CREDENTIALS)
-            logger.info("Successfully parsed GSHEET_CREDENTIALS JSON")
+            # logger.info("Successfully parsed GSHEET_CREDENTIALS JSON")
         except json.JSONDecodeError as jde:
             logger.error(f"JSON decode error in GSHEET_CREDENTIALS: {jde}")
             logger.error(f"Raw credentials (first 100 chars): {GSHEET_CREDENTIALS[:100]}")
