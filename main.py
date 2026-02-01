@@ -268,7 +268,7 @@ async def init_database():
         logger.error("DATABASE_CONNSTR not set")
         return
 
-    db_pool = await asyncpg.create_pool(DATABASE_CONNSTR)
+    db_pool = await asyncpg.create_pool(DATABASE_CONNSTR, ssl='require')
     
     async with db_pool.acquire() as conn:
         # Create rates table
@@ -353,23 +353,50 @@ async def scrape_revolut_rate():
 
 async def scrape_google_rate(wait_sec=2):
     try:
+        if not GSHEET_CREDENTIALS:
+            logger.error("GOOGLE_APPLICATION_CREDENTIALS environment variable is not set")
+            return None
+        
+        logger.info(f"GSHEET_CREDENTIALS length: {len(GSHEET_CREDENTIALS)}")
+        # Log first 20 chars to see if there are leading quotes or weirdness
+        logger.info(f"GSHEET_CREDENTIALS start: {GSHEET_CREDENTIALS[:20]}...")
+
         # Standard Google Sheets and Drive scopes
         scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        
+        try:
+            creds_dict = json.loads(GSHEET_CREDENTIALS)
+            logger.info("Successfully parsed GSHEET_CREDENTIALS JSON")
+        except json.JSONDecodeError as jde:
+            logger.error(f"JSON decode error in GSHEET_CREDENTIALS: {jde}")
+            logger.error(f"Raw credentials (first 100 chars): {GSHEET_CREDENTIALS[:100]}")
+            return None
+
         creds = service_account.Credentials.from_service_account_info(
-            json.loads(GSHEET_CREDENTIALS),
+            creds_dict,
             scopes=scopes
         )
         client = gspread.authorize(creds)
         formula = '=GOOGLEFINANCE("CURRENCY:SGDMYR")'
         cell = "A1"
+        
+        logger.info(f"Opening sheet: {GSHEET_URL}")
         sheet = client.open_by_url(GSHEET_URL).sheet1
+        
+        logger.info(f"Updating cell {cell} with formula {formula}")
         sheet.update_acell(cell, formula)
+        
         # Use asyncio.sleep instead of time.sleep in async function
+        logger.info(f"Waiting {wait_sec} seconds for Google Finance to update...")
         await asyncio.sleep(wait_sec)
-        rate = float(sheet.acell(cell, value_render_option='UNFORMATTED_VALUE').value)
+        
+        val = sheet.acell(cell, value_render_option='UNFORMATTED_VALUE').value
+        logger.info(f"Raw value from sheet: {val}")
+        
+        rate = float(val)
         return rate
     except Exception as e:
-        logger.error(f"Failed to scrape Google rate: {e}")
+        logger.error(f"Failed to scrape Google rate: {e}", exc_info=True)
         return None
 
 
