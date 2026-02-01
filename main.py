@@ -351,15 +351,15 @@ async def scrape_revolut_rate():
     return [page_2_rate]
 
 
-async def scrape_google_rate(wait_sec=2):
+async def scrape_google_rate(wait_sec=1):
     try:
         if not GSHEET_CREDENTIALS:
             logger.error("GOOGLE_APPLICATION_CREDENTIALS environment variable is not set")
             return None
         
-        logger.info(f"GSHEET_CREDENTIALS length: {len(GSHEET_CREDENTIALS)}")
-        # Log first 20 chars to see if there are leading quotes or weirdness
-        logger.info(f"GSHEET_CREDENTIALS start: {GSHEET_CREDENTIALS[:20]}...")
+        # logger.info(f"GSHEET_CREDENTIALS length: {len(GSHEET_CREDENTIALS)}")
+        # # Log first 20 chars to see if there are leading quotes or weirdness
+        # logger.info(f"GSHEET_CREDENTIALS start: {GSHEET_CREDENTIALS[:20]}...")
 
         # Standard Google Sheets and Drive scopes
         scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
@@ -380,18 +380,18 @@ async def scrape_google_rate(wait_sec=2):
         formula = '=GOOGLEFINANCE("CURRENCY:SGDMYR")'
         cell = "A1"
         
-        logger.info(f"Opening sheet: {GSHEET_URL}")
+        # logger.info(f"Opening sheet: {GSHEET_URL}")
         sheet = client.open_by_url(GSHEET_URL).sheet1
         
-        logger.info(f"Updating cell {cell} with formula {formula}")
+        # logger.info(f"Updating cell {cell} with formula {formula}")
         sheet.update_acell(cell, formula)
         
         # Use asyncio.sleep instead of time.sleep in async function
-        logger.info(f"Waiting {wait_sec} seconds for Google Finance to update...")
+        # logger.info(f"Waiting {wait_sec} seconds for Google Finance to update...")
         await asyncio.sleep(wait_sec)
         
         val = sheet.acell(cell, value_render_option='UNFORMATTED_VALUE').value
-        logger.info(f"Raw value from sheet: {val}")
+        # logger.info(f"Raw value from sheet: {val}")
         
         rate = float(val)
         return rate
