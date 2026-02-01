@@ -9,7 +9,6 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 import asyncpg
-from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from fastapi import FastAPI
@@ -17,6 +16,12 @@ from fastapi.responses import HTMLResponse
 import uvicorn
 import threading
 
+import json
+import time
+import gspread
+from google.oauth2 import service_account
+
+from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
@@ -32,6 +37,8 @@ UTC = timezone.utc
 # Configuration
 SCRAPE_INTERVAL = int(os.getenv("SCRAPE_INTERVAL", 5))
 DATABASE_CONNSTR = os.getenv("DATABASE_CONNSTR")
+GSHEET_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") 
+GSHEET_URL = os.getenv("GOOGLE_SHEET_URL")
 
 # Global database connection pool
 db_pool = None
@@ -43,7 +50,11 @@ scrape_stats = {
     "failed_scrapes": 0,
     "last_scrape_time": None,
     "last_rate": None,
-    "next_scrape_time": None
+    "next_scrape_time": None,
+    "sources": {
+        "Revolut": {"total": 0, "success": 0, "failed": 0, "last_rate": None},
+        "Google": {"total": 0, "success": 0, "failed": 0, "last_rate": None}
+    }
 }
 
 # Store recent logs in memory (max 200 entries)
@@ -70,6 +81,21 @@ async def status_page():
     
     # Get recent logs
     recent_logs = "\n".join(log_entries)
+    
+    # Generate source breakdown HTML
+    source_stats_html = ""
+    for source, stats in scrape_stats["sources"].items():
+        source_stats_html += f"""
+        <div class="stat-item" style="border-left-color: #2196F3;">
+            <div class="stat-label">{source} Source</div>
+            <div style="font-size: 14px; margin-top: 5px;">
+                Total: <strong>{stats['total']}</strong><br>
+                Success: <span class="success"><strong>{stats['success']}</strong></span><br>
+                Failed: <span class="error"><strong>{stats['failed']}</strong></span><br>
+                Last Rate: <strong>{stats['last_rate'] if stats['last_rate'] else 'N/A'}</strong>
+            </div>
+        </div>
+        """
     
     html = f"""
     <!DOCTYPE html>
@@ -156,19 +182,19 @@ async def status_page():
             <h2>📊 Statistics</h2>
             <div class="stats">
                 <div class="stat-item">
-                    <div class="stat-label">Total Scrapes</div>
+                    <div class="stat-label">Global Total</div>
                     <div class="stat-value">{scrape_stats['total_scrapes']}</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-label">Successful</div>
+                    <div class="stat-label">Global Success</div>
                     <div class="stat-value success">{scrape_stats['successful_scrapes']}</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-label">Failed</div>
+                    <div class="stat-label">Global Failed</div>
                     <div class="stat-value error">{scrape_stats['failed_scrapes']}</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-label">Last Rate (Revolut)</div>
+                    <div class="stat-label">Last Rate (Global)</div>
                     <div class="stat-value">{scrape_stats['last_rate'] if scrape_stats['last_rate'] else 'N/A'}</div>
                 </div>
                 <div class="stat-item">
@@ -183,6 +209,11 @@ async def status_page():
                         {scrape_stats['next_scrape_time'].strftime('%Y-%m-%d %H:%M:%S UTC') if scrape_stats['next_scrape_time'] else 'N/A'}
                     </div>
                 </div>
+            </div>
+            
+            <h3 style="margin-top: 30px; color: #555;">Source Breakdown</h3>
+            <div class="stats">
+                {source_stats_html}
             </div>
         </div>
         
@@ -210,7 +241,8 @@ async def get_stats():
         "last_rate": scrape_stats['last_rate'],
         "last_scrape_time": scrape_stats['last_scrape_time'].isoformat() if scrape_stats['last_scrape_time'] else None,
         "next_scrape_time": scrape_stats['next_scrape_time'].isoformat() if scrape_stats['next_scrape_time'] else None,
-        "scrape_interval_minutes": SCRAPE_INTERVAL
+        "scrape_interval_minutes": SCRAPE_INTERVAL,
+        "sources": scrape_stats['sources']
     }
 
 
@@ -280,7 +312,7 @@ async def save_rate(source_name: str, rate: float, timestamp: datetime = None):
         logger.error(f"Failed to save rate for {source_name}: {e}")
 
 
-async def scrape_google_n_revolut_rate():
+async def scrape_revolut_rate():
     """Scrape SGD to MYR rate from Google Finance and Revolut."""
     stealth = Stealth()
     headless_mode = os.getenv("HEADLESS_SCRAPE", "True").lower() == "true"
@@ -319,30 +351,73 @@ async def scrape_google_n_revolut_rate():
     return [page_2_rate]
 
 
+async def scrape_google_rate(wait_sec=2):
+    try:
+        # Standard Google Sheets and Drive scopes
+        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(GSHEET_CREDENTIALS),
+            scopes=scopes
+        )
+        client = gspread.authorize(creds)
+        formula = '=GOOGLEFINANCE("CURRENCY:SGDMYR")'
+        cell = "A1"
+        sheet = client.open_by_url(GSHEET_URL).sheet1
+        sheet.update_acell(cell, formula)
+        # Use asyncio.sleep instead of time.sleep in async function
+        await asyncio.sleep(wait_sec)
+        rate = float(sheet.acell(cell, value_render_option='UNFORMATTED_VALUE').value)
+        return rate
+    except Exception as e:
+        logger.error(f"Failed to scrape Google rate: {e}")
+        return None
+
+
 async def scrape_and_save():
     """Scrape rates and save to database."""
     logger.info("Starting rate scraping...")
     
-    scrape_stats["total_scrapes"] += 1
     now_utc = datetime.now(UTC)
     scrape_stats["last_scrape_time"] = now_utc
     scrape_stats["next_scrape_time"] = now_utc + timedelta(minutes=SCRAPE_INTERVAL)
     
+    def record_attempt(source, success, rate=None):
+        scrape_stats["total_scrapes"] += 1
+        scrape_stats["sources"][source]["total"] += 1
+        if success:
+            scrape_stats["successful_scrapes"] += 1
+            scrape_stats["sources"][source]["success"] += 1
+            scrape_stats["sources"][source]["last_rate"] = rate
+            scrape_stats["last_rate"] = rate
+        else:
+            scrape_stats["failed_scrapes"] += 1
+            scrape_stats["sources"][source]["failed"] += 1
+
+    # Track Revolut
     try:
-        rates = await scrape_google_n_revolut_rate()
-        
-        # Save Revolut rate
+        rates = await scrape_revolut_rate()
         if rates[0] is not None:
             await save_rate("Revolut", rates[0], timestamp=now_utc)
-            scrape_stats["last_rate"] = rates[0]
-            scrape_stats["successful_scrapes"] += 1
+            record_attempt("Revolut", True, rates[0])
         else:
             logger.warning("No rate obtained from Revolut")
-            scrape_stats["failed_scrapes"] += 1
-            
+            record_attempt("Revolut", False)
     except Exception as e:
-        logger.error(f"Scraping failed: {e}")
-        scrape_stats["failed_scrapes"] += 1
+        logger.error(f"Revolut scraping failed: {e}")
+        record_attempt("Revolut", False)
+
+    # Track Google
+    try:
+        rate = await scrape_google_rate()
+        if rate is not None:
+            await save_rate("Google", rate, timestamp=now_utc)
+            record_attempt("Google", True, rate)
+        else:
+            logger.warning("No rate obtained from Google")
+            record_attempt("Google", False)
+    except Exception as e:
+        logger.error(f"Google scraping failed: {e}")
+        record_attempt("Google", False)
     
     logger.info("Scraping complete.")
 
@@ -394,203 +469,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
-    
-# import os
-# import re
-# import asyncio
-# import logging
-# from datetime import datetime, timedelta, timezone
-
-# from playwright.async_api import async_playwright
-# from playwright_stealth import Stealth
-
-# import asyncpg
-# from dotenv import load_dotenv
-# from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-# load_dotenv()
-
-# # Configure logging
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-# )
-# logger = logging.getLogger(__name__)
-
-# # Define Timezones
-# UTC = timezone.utc
-
-# # Configuration
-# SCRAPE_INTERVAL = int(os.getenv("SCRAPE_INTERVAL", 5))
-# DATABASE_CONNSTR = os.getenv("DATABASE_CONNSTR")
-
-# # Global database connection pool
-# db_pool = None
-
-
-# async def init_database():
-#     """Initialize PostgreSQL tables."""
-#     global db_pool
-#     if not DATABASE_CONNSTR:
-#         logger.error("DATABASE_CONNSTR not set")
-#         return
-
-#     db_pool = await asyncpg.create_pool(DATABASE_CONNSTR)
-    
-#     async with db_pool.acquire() as conn:
-#         # Create rates table
-#         await conn.execute("""
-#             CREATE TABLE IF NOT EXISTS rates (
-#                 id SERIAL PRIMARY KEY,
-#                 timestamp TIMESTAMPTZ NOT NULL,
-#                 source_name VARCHAR NOT NULL,
-#                 rate DOUBLE PRECISION NOT NULL
-#             )
-#         """)
-
-#         # Create indices
-#         await conn.execute("CREATE INDEX IF NOT EXISTS idx_rates_timestamp ON rates(timestamp)")
-#         await conn.execute("CREATE INDEX IF NOT EXISTS idx_rates_source ON rates(source_name)")
-
-#     logger.info("Database initialized successfully")
-
-
-# async def save_rate(source_name: str, rate: float, timestamp: datetime = None):
-#     """Save a rate to the database."""
-#     try:
-#         # Use UTC timezone for storage
-#         if timestamp is None:
-#             timestamp = datetime.now(UTC)
-#         elif timestamp.tzinfo is None:
-#             timestamp = timestamp.replace(tzinfo=UTC)
-#         else:
-#             timestamp = timestamp.astimezone(UTC)
-
-#         async with db_pool.acquire() as conn:
-#             await conn.execute(
-#                 """
-#                 INSERT INTO rates (timestamp, source_name, rate)
-#                 VALUES ($1, $2, $3)
-#                 """,
-#                 timestamp, source_name, rate
-#             )
-#         logger.info(f"Saved rate for {source_name}: {rate}")
-#     except Exception as e:
-#         logger.error(f"Failed to save rate for {source_name}: {e}")
-
-
-# async def scrape_google_n_revolut_rate():
-#     """Scrape SGD to MYR rate from Google Finance and Revolut."""
-#     stealth = Stealth()
-#     # headless_mode = os.getenv("HEADLESS_SCRAPE", "True").lower() == "true"
-#     headless_mode = False
-#     # page_1_rate = None
-#     page_2_rate = None
-    
-#     async with async_playwright() as p:
-#         browser = await p.chromium.launch(
-#             headless=headless_mode, 
-#             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-#         )
-#         context = await browser.new_context(
-#             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-#             viewport={'width': 1920, 'height': 1080}
-#         )
-#         await stealth.apply_stealth_async(context)
-#         # page_1 = await context.new_page()
-#         page_2 = await context.new_page()
-
-#         # # Scrape Google Finance
-#         # url = "https://www.google.com/finance/quote/SGD-MYR"
-#         # logger.info(f"Navigating to {url}...")
-#         # try:
-#         #     await page_1.goto(url)
-#         #     await page_1.wait_for_selector('div[data-last-price]', timeout=5000)
-#         #     rate = await page_1.locator('div[data-last-price]').get_attribute('data-last-price')
-#         #     page_1_rate = float(rate)
-#         # except Exception as e:
-#         #     logger.error(f"Failed to scrape Google rate: {e}")
-        
-#         # Scrape Revolut
-#         url = "https://www.revolut.com/currency-converter/convert-sgd-to-myr-exchange-rate/"
-#         logger.info(f"Navigating to {url}...")
-#         try:
-#             await page_2.goto(url)
-#             if await page_2.locator('span', has_text="Reject non-essential cookies").first.count() > 0:
-#                 await page_2.locator('span', has_text="Reject non-essential cookies").first.click()
-#             await page_2.locator('foreignObject span', has_text="RM").wait_for(state="visible", timeout=5000)
-#             text = await page_2.locator('foreignObject span', has_text="RM").text_content()
-#             text = text.replace('\xa0', ' ')
-#             match = re.search(r'RM\s*([\d.]+)', text)
-#             if match:
-#                 page_2_rate = float(match.group(1))
-#         except Exception as e:
-#             logger.error(f"Failed to scrape Revolut rate: {e}")
-        
-#         await browser.close()
-    
-#     return [page_2_rate]
-
-
-# async def scrape_and_save():
-#     """Scrape rates and save to database."""
-#     logger.info("Starting rate scraping...")
-    
-#     now_utc = datetime.now(UTC)
-    
-#     try:
-#         rates = await scrape_google_n_revolut_rate()
-        
-#         # # Save Google rate
-#         # if rates[0] is not None:
-#         #     await save_rate("Google", rates[0], timestamp=now_utc)
-#         # else:
-#         #     logger.warning("No rate obtained from Google")
-        
-#         # Save Revolut rate
-#         if rates[0] is not None:
-#             await save_rate("Revolut", rates[0], timestamp=now_utc)
-#         else:
-#             logger.warning("No rate obtained from Revolut")
-            
-#     except Exception as e:
-#         logger.error(f"Scraping failed: {e}")
-    
-#     logger.info("Scraping complete.")
-
-
-# async def main():
-#     """Main entry point."""
-#     # Initialize database
-#     await init_database()
-    
-#     # Setup scheduler
-#     scheduler = AsyncIOScheduler()
-#     scheduler.add_job(
-#         scrape_and_save,
-#         "interval",
-#         minutes=SCRAPE_INTERVAL,
-#         id="scrape_rates",
-#         replace_existing=True
-#     )
-#     scheduler.start()
-#     logger.info(f"Scheduler started. Scraping every {SCRAPE_INTERVAL} minutes.")
-    
-#     # Run initial scrape
-#     await scrape_and_save()
-    
-#     # Keep the script running
-#     try:
-#         while True:
-#             await asyncio.sleep(60)
-#     except KeyboardInterrupt:
-#         logger.info("Shutting down...")
-#         scheduler.shutdown()
-#         if db_pool:
-#             await db_pool.close()
-#         logger.info("Shutdown complete.")
-
-
-# if __name__ == "__main__":
-#     asyncio.run(main())
