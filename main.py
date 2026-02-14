@@ -268,7 +268,7 @@ async def init_database():
         logger.error("DATABASE_CONNSTR not set")
         return
 
-    db_pool = await asyncpg.create_pool(DATABASE_CONNSTR, ssl='require')
+    db_pool = await asyncpg.create_pool(DATABASE_CONNSTR, ssl='require',statement_cache_size=0)
     
     async with db_pool.acquire() as conn:
         # Create rates table
